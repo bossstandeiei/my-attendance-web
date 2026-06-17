@@ -137,7 +137,8 @@ else:
                 st.markdown(f"""<style>div.stButton > button[key="btn_{student['id']}"] {{background-color: #ff4b4b !important; color: white !important; border: none !important;}}</style>""", unsafe_allow_html=True)
         with c_delete:
             if st.button("❌", key=f"del_{student['id']}"):
-                st.session_state.students = [s for s in s  in st.session_state.students if s["id"] != student["id"]]
+                # แก้ไขบั๊กวนลูปซ้ำซ้อนตรงนี้เรียบร้อยครับ
+                st.session_state.students = [s for s in st.session_state.students if s["id"] != student["id"]]
                 st.rerun()
 
     st.markdown("---")
