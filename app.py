@@ -2,39 +2,45 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 from datetime import datetime
 import pandas as pd
+import requests
+import json
 
 st.set_page_config(page_title="ระบบเช็คชื่อออนไลน์", page_icon="📋", layout="centered")
-st.title("📋 ระบบเช็คชื่อและนับวันขาดสะสม (Online)")
+st.title("📋 ระบบเช็คชื่อและนับวันขาดสะสมรายสัปดาห์ (Online)")
 
-# ดึงลิงก์ Google Sheets จากระบบตั้งค่าของ Streamlit
-sheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+# 🔗 ลิงก์ Web App URL ของบอส
+SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrj_wUbQ_yVfDkYZBI2gAmo10Jkhm712lif7Z_PNQ6r66xKtyNH86pGu8tCzSfjKLi/exec"
 
-# เชื่อมต่อ Google Sheets
+# ลิงก์ดึงข้อมูลรายชื่อตั้งต้น
+sheet_url = "https://docs.google.com/spreadsheets/d/174ayeuwSmC4xqZRj5PC_q0nMuinwkcHEpINmmoCyhH0/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# ฟังก์ชันโหลดข้อมูล
 def load_data():
     try:
         df = conn.read(spreadsheet=sheet_url, ttl=0)
+        for col in ["id", "name", "status", "absent_days", "last_checked_date"]:
+            if col not in df.columns:
+                df[col] = ""
         return df.to_dict(orient="records")
     except:
         return []
 
-# ฟังก์ชันเซฟข้อมูล
-def save_data(data):
-    df = pd.DataFrame(data)
-    conn.update(spreadsheet=sheet_url, data=df)
-    st.cache_data.clear()
-
-# โหลดข้อมูลเข้าเว็บ
 if "students" not in st.session_state:
-    st.session_state.students = load_data()
+    raw_data = load_data()
+    for s in raw_data:
+        if not s.get("status"): s["status"] = "ขาด"
+        if not s.get("absent_days"): s["absent_days"] = 0
+        if not s.get("last_checked_date"): s["last_checked_date"] = ""
+    st.session_state.students = raw_data
 
 current_date = datetime.now().strftime("%Y-%m-%d")
+current_week = datetime.now().strftime("%U")
+
 if "last_date" not in st.session_state:
     st.session_state.last_date = current_date
+if "last_week" not in st.session_state:
+    st.session_state.last_week = current_week
 
-# ระบบรีเซ็ตวันต่อวัน
 if st.session_state.last_date != current_date:
     for student in st.session_state.students:
         if student["status"] == "ขาด" and student.get("last_checked_date") != st.session_state.last_date:
@@ -42,16 +48,37 @@ if st.session_state.last_date != current_date:
             student["last_checked_date"] = st.session_state.last_date
         student["status"] = "ขาด"
     st.session_state.last_date = current_date
-    save_data(st.session_state.students)
-    st.toast("🔄 เริ่มต้นวันใหม่! รีเซ็ตสถานะและอัปเดตยอดสะสมแล้ว", icon="ℹ️")
+    st.toast("🔄 เริ่มต้นวันใหม่! รีเซ็ตสถานะประจำวันแล้ว", icon="ℹ️")
 
-st.info(f"📅 วันที่เช็คชื่อปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}**")
+if st.session_state.last_week != current_week:
+    for student in st.session_state.students:
+        student["absent_days"] = 0
+    st.session_state.last_week = current_week
+    st.toast("📅 เริ่มต้นสัปดาห์ใหม่! รีเซ็ตยอดขาดสะสมเป็น 0 แล้ว", icon="ℹ️")
+
+st.info(f"📅 วันที่เช็คชื่อปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}** (สัปดาห์ที่ {current_week})")
+
+# --- 💾 ปุ่มบันทึกข้อมูลเข้า Google Sheets แบบเสถียร 100% ---
+if st.button("💾 บันทึกข้อมูลลง Google Sheets (เซฟถาวร)", type="primary", use_container_width=True):
+    with st.spinner("กำลังส่งข้อมูลอัปเดตลง Google Sheets..."):
+        try:
+            headers = {"Content-Type": "application/json"}
+            payload = json.dumps(st.session_state.students)
+            response = requests.post(SCRIPT_URL, data=payload, headers=headers)
+            if response.status_code == 200:
+                st.success("✅ บันทึกสถิติข้อมูลลง Google Sheets สำเร็จแล้วครับบอส!")
+            else:
+                st.error("❌ เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง")
+        except Exception as e:
+            st.error(f"❌ ไม่สามารถส่งข้อมูลได้: {e}")
+
+st.markdown("---")
 
 # --- ส่วนที่ 1: เพิ่มรายชื่อ ---
-st.subheader("➕ เพิ่มรายชื่อนักเรียน")
+st.subheader("➕ เพิ่มรายชื่อใหม่")
 col1, col2 = st.columns([3, 1])
 with col1:
-    new_name = st.text_input("ชื่อ-นามสกุล", placeholder="พิมพ์ชื่อนักเรียนที่นี่...", label_visibility="collapsed")
+    new_name = st.text_input("ชื่อ-นามสกุล", placeholder="พิมพ์ชื่อที่ต้องการเพิ่มที่นี่...", label_visibility="collapsed")
 with col2:
     if st.button("เพิ่มรายชื่อ", use_container_width=True):
         if new_name.strip() != "":
@@ -59,15 +86,14 @@ with col2:
             st.session_state.students.append({
                 "id": student_id, "name": new_name, "status": "ขาด", "absent_days": 0, "last_checked_date": ""
             })
-            save_data(st.session_state.students)
             st.rerun()
 
 st.markdown("---")
 
 # --- ส่วนที่ 2: ตารางเช็คชื่อ ---
-st.subheader("🧑‍🎓 รายชื่อ การเช็คชื่อ และยอดขาดสะสม")
+st.subheader("🧑‍💻 รายชื่อ การเช็คชื่อ และยอดขาดสะสมอาทิตย์นี้")
 if len(st.session_state.students) == 0:
-    st.info("ยังไม่มีรายชื่อนักเรียนในระบบ ลองเพิ่มชื่อด้านบนได้เลยครับ")
+    st.info("ยังไม่มีข้อมูลรายชื่อในระบบ ลองเพิ่มชื่อด้านบนได้เลยครับ")
 else:
     total_students = len(st.session_state.students)
     present_count = sum(1 for s in st.session_state.students if s["status"] == "มา")
@@ -105,21 +131,19 @@ else:
                         if original_student["status"] == "ขาด": original_student["status"] = "มา"
                         elif original_student["status"] == "มา": original_student["status"] = "ลา"
                         else: original_student["status"] = "ขาด"
-                save_data(st.session_state.students)
                 st.rerun()
                 
             if student["status"] == "ขาด":
                 st.markdown(f"""<style>div.stButton > button[key="btn_{student['id']}"] {{background-color: #ff4b4b !important; color: white !important; border: none !important;}}</style>""", unsafe_allow_html=True)
         with c_delete:
             if st.button("❌", key=f"del_{student['id']}"):
-                st.session_state.students = [s for s in st.session_state.students if s["id"] != student["id"]]
-                save_data(st.session_state.students)
+                st.session_state.students = [s for s in s  in st.session_state.students if s["id"] != student["id"]]
                 st.rerun()
 
     st.markdown("---")
     st.subheader("📊 สรุปยอดรวมวันนี้")
     m1, m2, m3, m4 = st.columns(4)
-    with m1: st.metric(label="นักเรียนทั้งหมด", value=f"{total_students} คน")
+    with m1: st.metric(label="จำนวนทั้งหมด", value=f"{total_students} คน")
     with m2: st.metric(label="🟢 มา", value=f"{present_count} คน")
     with m3: st.metric(label="🔴 ขาด", value=f"{absent_count} คน")
     with m4: st.metric(label="🟡 ลา", value=f"{leave_count} คน")
