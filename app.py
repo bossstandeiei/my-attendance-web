@@ -8,13 +8,14 @@ import json
 st.set_page_config(page_title="ระบบเช็คชื่อออนไลน์", page_icon="📋", layout="centered")
 st.title("📋 ระบบเช็คชื่อและนับวันขาดสะสมรายสัปดาห์ (Online)")
 
-# 🔗 ลิงก์ Web App URL ของบอส
+# 🔗 ท่อส่งข้อมูลผ่าน Web App หลังบ้านของ Google Sheets (ของบอสที่ใช้งานได้จริง)
 SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyrj_wUbQ_yVfDkYZBI2gAmo10Jkhm712lif7Z_PNQ6r66xKtyNH86pGu8tCzSfjKLi/exec"
 
-# ลิงก์ดึงข้อมูลรายชื่อตั้งต้น
+# ลิงก์ดึงข้อมูลรายชื่อตั้งต้นมาแสดงผล
 sheet_url = "https://docs.google.com/spreadsheets/d/174ayeuwSmC4xqZRj5PC_q0nMuinwkcHEpINmmoCyhH0/edit?usp=sharing"
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+# ฟังก์ชันโหลดข้อมูลตอนเปิดเว็บ
 def load_data():
     try:
         df = conn.read(spreadsheet=sheet_url, ttl=0)
@@ -25,6 +26,19 @@ def load_data():
     except:
         return []
 
+# ฟังก์ชันเซฟข้อมูลใหม่ (แก้จุดตายจากที่ใช้ conn.update เปลี่ยนมาส่งผ่านท่อแทน)
+def save_data_to_sheets(data_list):
+    try:
+        headers = {"Content-Type": "application/json"}
+        payload = json.dumps(data_list)
+        response = requests.post(SCRIPT_URL, data=payload, headers=headers)
+        if response.status_code == 200:
+            return True
+        return False
+    except:
+        return False
+
+# ตรวจสอบค่าภายใน Session
 if "students" not in st.session_state:
     raw_data = load_data()
     for s in raw_data:
@@ -36,11 +50,10 @@ if "students" not in st.session_state:
 current_date = datetime.now().strftime("%Y-%m-%d")
 current_week = datetime.now().strftime("%U")
 
-if "last_date" not in st.session_state:
-    st.session_state.last_date = current_date
-if "last_week" not in st.session_state:
-    st.session_state.last_week = current_week
+if "last_date" not in st.session_state: st.session_state.last_date = current_date
+if "last_week" not in st.session_state: st.session_state.last_week = current_week
 
+# ตรวจสอบการรีเซ็ตวัน / สัปดาห์
 if st.session_state.last_date != current_date:
     for student in st.session_state.students:
         if student["status"] == "ขาด" and student.get("last_checked_date") != st.session_state.last_date:
@@ -58,19 +71,13 @@ if st.session_state.last_week != current_week:
 
 st.info(f"📅 วันที่เช็คชื่อปัจจุบัน: **{datetime.now().strftime('%d/%m/%Y')}** (สัปดาห์ที่ {current_week})")
 
-# --- 💾 ปุ่มบันทึกข้อมูลเข้า Google Sheets แบบเสถียร 100% ---
+# --- 💾 ปุ่มบันทึกข้อมูลแบบใหม่ (ไม่มีระเบิดหน้าจอแดงแน่นอน) ---
 if st.button("💾 บันทึกข้อมูลลง Google Sheets (เซฟถาวร)", type="primary", use_container_width=True):
     with st.spinner("กำลังส่งข้อมูลอัปเดตลง Google Sheets..."):
-        try:
-            headers = {"Content-Type": "application/json"}
-            payload = json.dumps(st.session_state.students)
-            response = requests.post(SCRIPT_URL, data=payload, headers=headers)
-            if response.status_code == 200:
-                st.success("✅ บันทึกสถิติข้อมูลลง Google Sheets สำเร็จแล้วครับบอส!")
-            else:
-                st.error("❌ เกิดข้อผิดพลาดจากเซิร์ฟเวอร์ กรุณาลองใหม่อีกครั้ง")
-        except Exception as e:
-            st.error(f"❌ ไม่สามารถส่งข้อมูลได้: {e}")
+        if save_data_to_sheets(st.session_state.students):
+            st.success("✅ บันทึกสถิติข้อมูลลง Google Sheets สำเร็จแล้วครับบอส!")
+        else:
+            st.error("❌ บันทึกไม่สำเร็จ กรุณาตรวจสอบสิทธิ์การตั้งค่า Web App ใน Google Sheets")
 
 st.markdown("---")
 
@@ -86,11 +93,13 @@ with col2:
             st.session_state.students.append({
                 "id": student_id, "name": new_name, "status": "ขาด", "absent_days": 0, "last_checked_date": ""
             })
+            # บันทึกข้อมูลลงชีตให้อัตโนมัติทันทีที่มีการเพิ่มชื่อใหม่
+            save_data_to_sheets(st.session_state.students)
             st.rerun()
 
 st.markdown("---")
 
-# --- ส่วนที่ 2: ตารางเช็คชื่อ ---
+# --- ส่วนที่ 2: ตารางแสดงข้อมูลและการเช็คชื่อ ---
 st.subheader("🧑‍💻 รายชื่อ การเช็คชื่อ และยอดขาดสะสมอาทิตย์นี้")
 if len(st.session_state.students) == 0:
     st.info("ยังไม่มีข้อมูลรายชื่อในระบบ ลองเพิ่มชื่อด้านบนได้เลยครับ")
@@ -118,12 +127,9 @@ else:
         with c_history:
             st.markdown(f"⚠️ ขาด **{int(student.get('absent_days', 0))}** วัน")
         with c_status:
-            if student["status"] == "ขาด":
-                button_type = "type"; display_text = "🔴 ขาด"
-            elif student["status"] == "มา":
-                button_type = "primary"; display_text = "🟢 มา"
-            else:
-                button_type = "secondary"; display_text = "🟡 ลา"
+            if student["status"] == "ขาด": button_type = "type"; display_text = "🔴 ขาด"
+            elif student["status"] == "มา": button_type = "primary"; display_text = "🟢 มา"
+            else: button_type = "secondary"; display_text = "🟡 ลา"
             
             if st.button(display_text, key=f"btn_{student['id']}", type="secondary" if button_type=="type" else button_type, use_container_width=True):
                 for original_student in st.session_state.students:
@@ -137,8 +143,8 @@ else:
                 st.markdown(f"""<style>div.stButton > button[key="btn_{student['id']}"] {{background-color: #ff4b4b !important; color: white !important; border: none !important;}}</style>""", unsafe_allow_html=True)
         with c_delete:
             if st.button("❌", key=f"del_{student['id']}"):
-                # แก้ไขบั๊กวนลูปซ้ำซ้อนตรงนี้เรียบร้อยครับ
                 st.session_state.students = [s for s in st.session_state.students if s["id"] != student["id"]]
+                save_data_to_sheets(st.session_state.students)
                 st.rerun()
 
     st.markdown("---")
