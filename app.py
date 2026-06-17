@@ -34,7 +34,7 @@ current_date = datetime.now().strftime("%Y-%m-%d")
 if "last_date" not in st.session_state:
     st.session_state.last_date = current_date
 
-# ระบบรีเซ็ตวันต่อวัน (ตัดคำว่า เรียน ออกในตรรกะเช็คสถานะ)
+# ระบบรีเซ็ตวันต่อวัน
 if st.session_state.last_date != current_date:
     for student in st.session_state.students:
         if student["status"] == "ขาด" and student.get("last_checked_date") != st.session_state.last_date:
@@ -74,7 +74,6 @@ else:
     absent_count = sum(1 for s in st.session_state.students if s["status"] == "ขาด")
     leave_count = sum(1 for s in st.session_state.students if s["status"] == "ลา")
 
-    # จัดลำดับความสำคัญตามสถานะใหม่
     def sort_by_status(student):
         if student["status"] == "ขาด": return 1
         elif student["status"] == "ลา": return 2
@@ -100,7 +99,6 @@ else:
             else:
                 button_type = "secondary"; display_text = "🟡 ลา"
             
-            # ปรับการลูปสถานะ: ขาด -> มา -> ลา -> ขาด
             if st.button(display_text, key=f"btn_{student['id']}", type="secondary" if button_type=="type" else button_type, use_container_width=True):
                 for original_student in st.session_state.students:
                     if original_student["id"] == student["id"]:
